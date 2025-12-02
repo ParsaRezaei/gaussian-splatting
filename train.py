@@ -46,7 +46,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         sys.exit(f"Trying to use sparse adam but it is not installed, please install the correct rasterizer using pip install [3dgs_accel].")
 
     first_iter = 0
-    tb_writer = prepare_output_and_logger(dataset)
+    tb_writer = prepare_output_and_logger(dataset, opt)
     gaussians = GaussianModel(dataset.sh_degree, opt.optimizer_type)
     scene = Scene(dataset, gaussians)
     gaussians.training_setup(opt)
@@ -189,13 +189,41 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
-def prepare_output_and_logger(args):    
+def prepare_output_and_logger(args, opt):    
     if not args.model_path:
-        if os.getenv('OAR_JOB_ID'):
-            unique_str=os.getenv('OAR_JOB_ID')
+        # Derive model_path from source path following the pattern:
+        # output/<dataset_parent>/<dataset>/<iterations>_iter
+        # For example: datasets/tandt/truck -> output/tandt/truck/10000_iter
+        try:
+            src = os.path.abspath(args.source_path)
+        except Exception:
+            src = None
+
+        if src and src != "":
+            base = os.path.basename(src)  # e.g., "truck"
+            parent = os.path.basename(os.path.dirname(src))  # e.g., "tandt"
+            
+            # Get iterations count from opt parameter
+            try:
+                iters = int(opt.iterations)
+            except Exception:
+                iters = 30000  # default fallback
+            
+            iter_folder = f"{iters}_iter"
+            
+            if parent and parent != ".":
+                # Full path: output/tandt/truck/10000_iter
+                args.model_path = os.path.join("./output", parent, base, iter_folder)
+            else:
+                # Fallback: output/truck/10000_iter
+                args.model_path = os.path.join("./output", base, iter_folder)
         else:
-            unique_str = str(uuid.uuid4())
-        args.model_path = os.path.join("./output/", unique_str[0:10])
+            # Fallback to previous behavior (random short uuid)
+            if os.getenv('OAR_JOB_ID'):
+                unique_str = os.getenv('OAR_JOB_ID')
+            else:
+                unique_str = str(uuid.uuid4())
+            args.model_path = os.path.join("./output/", unique_str[0:10])
         
     # Set up output folder
     print("Output folder: {}".format(args.model_path))
